@@ -1,0 +1,117 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import GradientBoostingRegressor as gbr
+from xgboost import XGBRegressor as xgbr
+from catboost import CatBoostRegressor as cbr
+from sklearn.model_selection import GridSearchCV
+from sklearn.linear_model import LinearRegression as lr
+from sklearn.neural_network import MLPRegressor
+import random
+import pickle
+
+# data from kaggle competition
+train=pd.read_csv('../Kaggle Molecular bond/train.csv')
+
+def one_hot_encode(y):
+    N=len(y)
+    K=len(set(y))
+    cols=y.columns
+    Y=y.iloc[:,-1]
+    for i in range(len(cols)-2,0,-1):
+        Y1=pd.get_dummies(y.iloc[:,i])
+        if type(Y1.columns[0])==str:
+            Y=pd.concat([Y1,Y], axis=1)
+        else:
+            new_cols=[cols[i]+str(j) for j in Y1.columns]
+            Y1.columns=new_cols
+            Y=pd.concat([Y1,Y], axis=1)
+    return Y
+
+train_data=train[train.columns[1:]]
+
+traindata=one_hot_encode(train_data)
+
+
+seed=42
+random.seed(seed)
+n=len(traindata.iloc[:,-1])
+train_ind=random.smaple(list(range(n)),int(n*.8))
+test_ind=list(set(list(range(n)))-set(train_ind))
+
+trainset=traindata.iloc[train_ind,:]
+validset=traindata.iloc[test_ind,:]
+
+folder='.../GitHub/molecular bond'
+
+lin_reg=lr()
+model_lr=lin_reg.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+Y_lr=model_lr.predict(validset.iloc[:,:-1])
+print('R2:'model_lr.score(validset.iloc[:,:-1],validset.iloc[:,-1]))
+
+regressor=open(folder+'/models/lr_regression.py', 'wb')
+pickle.dump(model_lr,regressor)
+regressor.close()
+
+gbreg=gbr(learning_rate=0.1, verbose=1, gamma=0.7, loss='lad')
+# params={ 'learning_rate':[0.1,0.2,0.3]}
+# model_gbreg=GridSearchCV(estimator=gbreg,param_grid=params,cv=5,n_jobs=-1)
+# model_gbr=model_gbreg.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+model_gbr=gbreg.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+Y_gbr=model_gbr.predict(validset.iloc[:,:-1])
+print('R2:' model_gbr.score(validset.iloc[:,:-1],validset.iloc[:,-1]))
+
+regressor=open(folder+'/models/gb_regression.py', 'wb')
+pickle.dump(model_gbr,regressor)
+regressor.close()
+
+cbreg=cbr(learning_rate=0.01,verbose=1)
+# params={'learning_rate':[0.01,0.05]}
+# model_cbreg=GridSearchCV(estimator=cbreg,param_grid=params,cv=5,n_jobs=-1)
+# model_cbr=model_cbreg.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+model_cbr=cbreg.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+Y_cbr=model_cbr.predict(validset.iloc[:,:-1])
+R2=1-np.sum((Y_cbr-validset.iloc[:,-1])**2 )/np.sum((validset.iloc[:,-1]-validset.iloc[:,-1].mean())**2)
+print('R2:' R2)
+
+regressor=open(folder+'/models/cb_regression.py', 'wb')
+pickle.dump(model_cbr,regressor)
+regressor.close()
+
+xgbreg=xgbr(n_jobs=-1,learning_rate=0.2, objective='reg:squarederror', verbosity=1)
+# params={'learning_rate':[0.01,0.05,0.1,0.2,0.3], 'gamma':[0,0.01], 'booster':['gbtree','gblinear','dart']}
+# model_xgbreg=GridSearchCV(estimator=xgbreg,param_grid=params,cv=5,n_jobs=-1, verbose=1)
+# model_xgb=model_xgbreg.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+model_xgb=xgbreg.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+Y_xgb=model_xgb.predict(validset.iloc[:,:-1])
+print('R2:' model_xgb.score(validset.iloc[:,:-1],validset.iloc[:,-1]))
+
+regressor=open(folder+'/models/xgb_regression.py', 'wb')
+pickle.dump(model_xgb,regressor)
+regressor.close()
+
+_nn=MLPRegressor(verbose=True, max_iter=60)
+model_nn=_nn.fit(trainset.iloc[:,:-1],trainset.iloc[:,-1])
+Y_nn=model_nn.predict(validset.iloc[:,:-1])
+print('R2:' model_nn.score(validset.iloc[:,:-1],validset.iloc[:,-1]))
+
+regressor=open(folder+'/models/nn_regression.py', 'wb')
+pickle.dump(model_nn,regressor)
+regressor.close()
+
+xgbr=xgbr(n_jobs=-1,learning_rate=0.2, objective='reg:squarederror', verbosity=1)
+df=np.column_stack((Y_cbr,Y_xgb,Y_nn))
+f_model=xgbr.fit(df,validset.iloc[:,-1])
+print('R2:' f_model.score(df,validset.iloc[:,-1]))
+
+regressor=open(folder+'/models/final_model.py', 'wb')
+pickle.dump(f_model,regressor)
+regressor.close()
+
+final_model={0:model_cbr,1:model_xgb, 2:model_nn, 3:f_model}
+regressor=open(folder+'/models/aggregate_model.py', 'wb')
+pickle.dump(final_model,regressor)
+regressor.close()
+
+cols=traindata.columns[:-1]
+cols=pd.DataFrame(cols)
+cols.to_csv(folder+'/columns.csv')
